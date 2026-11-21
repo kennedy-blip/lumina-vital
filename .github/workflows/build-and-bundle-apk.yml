@@ -1,0 +1,69 @@
+name: Build & Bundle LuminaVital Android APK
+
+on:
+  push:
+    branches: [ main, "arena/**" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout LuminaVital Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Java JDK 21 for Gradle & Capacitor Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Build Production Vite Web Bundle
+        run: npm run build
+
+      - name: Initialize & Sync Capacitor Android Platform
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Configure Android Manifest Camera & Sensor Permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ] && ! grep -q "android.permission.CAMERA" "$MANIFEST"; then
+            sed -i 's|<application|<uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application|' "$MANIFEST"
+          fi
+
+      - name: Compile Android Release APK via Gradle
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Bundle APK into Public Releases for Vercel One-Tap Download
+        run: |
+          mkdir -p public/releases
+          cp android/app/build/outputs/apk/debug/app-debug.apk public/releases/luminavital-release.apk
+          sha256sum public/releases/luminavital-release.apk > public/releases/luminavital-release.apk.sha256
+
+      - name: Upload Compiled LuminaVital APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuminaVital-BioOptic-v1.0.0-apk
+          path: public/releases/luminavital-release.apk
+          if-no-files-found: error
